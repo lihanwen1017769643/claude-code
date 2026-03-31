@@ -5,37 +5,39 @@
 
 ## Executive Overview
 
-I reverse-engineered this codebase as a large-scale TypeScript/Bun runtime for an AI coding assistant CLI that supports:
+This repository contains the core runtime behind **Claude Code**, Anthropic's coding CLI agent.  
+It is not just a command wrapper. It is a full execution platform for:
 
-- Interactive TUI usage
-- Headless/SDK streaming workflows
-- Remote and bridge-controlled sessions
-- Multi-agent/background task execution
-- MCP (Model Context Protocol) tool federation
-- Enterprise policy and managed settings enforcement
+- Interactive coding sessions in terminal UI mode
+- Headless SDK/automation workflows
+- Remote and bridge-driven sessions
+- Multi-agent task orchestration
+- MCP-native tool integration
+- Enterprise-grade policy, permissions, and managed settings
 
-The system is significant because it is not a thin CLI wrapper. It is a full execution platform with its own:
+From an engineering perspective, this system is significant because it combines:
 
-- Stateful runtime kernel (`bootstrap/state.ts`)
-- Permission/sandbox policy engine
-- Agent/task orchestration fabric
-- Pluggable skill/plugin/MCP extension model
-- Remote-control control plane (bridge + direct connect)
+- A high-performance startup path
+- Deep runtime modularity through feature gates
+- Safety boundaries (trust, permissions, sandbox, policy controls)
+- Strong extensibility (tools, skills, plugins, MCP servers)
+- Stateful long-running session infrastructure
 
 ---
 
 ## System Architecture
 
-### High-Level Architecture
+### High-Level Model
 
-At runtime, the architecture is layered:
+Claude Code is organized into six runtime layers:
 
-1. Entry and dispatch layer (`entrypoints/cli.tsx`) for ultra-fast mode routing.
-2. Initialization layer (`entrypoints/init.ts`) for trust/config/network/telemetry bootstrapping.
-3. Session runtime layer (`main.tsx` and `cli/print.ts`) for interactive/headless conversation loops.
-4. Query and tool execution engine (`query.ts`, `QueryEngine.ts`, `services/tools/*`).
-5. Integrations layer (MCP, plugins, skills, remote bridge, direct connect).
-6. Persistence/state layer (session transcripts, history, settings, caches, metrics).
+1. **CLI Entry Dispatcher**: Fast-path command routing and selective module loading.
+2. **Initialization Layer**: Config, trust gates, env setup, network transport setup, telemetry boot.
+3. **Session Runtime Layer**: Interactive + non-interactive execution coordination.
+4. **Query/Tool Execution Core**: Main agent loop, token/context control, tool orchestration.
+5. **Integration Plane**: MCP, plugin/skill systems, remote and bridge transports.
+6. **State/Persistence Plane**: App state, transcript JSONL storage, history, cost and usage tracking.
+
 
 ### Complete Architecture (Mermaid)
 
@@ -276,124 +278,115 @@ The runtime supports multiple task execution types:
 
 ## Tooling & Infrastructure
 
-### Internal Tooling
+### Tool Platform
 
-- Strongly typed tool contracts with zod schemas.
-- Dynamic tool pool assembly based on permission mode, policy, feature gate, environment, and agent mode.
-- MCP tools are bridged into the same selection pipeline as built-in tools.
+- Tools are typed and schema-validated.
+- Tool visibility is policy-aware and permission-aware.
+- MCP tools are merged into the same operational pool as native tools.
 
-### External Integrations
+### Infrastructure Integrations
 
-- Anthropic API request/stream loop with retry and fallback handling.
-- MCP transports: stdio, SSE, streamable HTTP, WebSocket.
-- OAuth/API-key mixed auth model.
-- GrowthBook-driven capability rollout.
-- OpenTelemetry/first-party event logging.
+- API streaming + retry controls in main inference loop.
+- MCP protocol transport support across stdio/SSE/HTTP/WS.
+- Auth model supports both API key and OAuth paths.
+- Feature rollout and dynamic behavior controlled by GrowthBook.
+- Telemetry and diagnostics integrated into startup + runtime phases.
 
-### CLI Surface
-
-- Extremely broad command surface in `commands.ts`.
-- Distinct remote-safe and bridge-safe command filtering.
-- Supports both interactive UI and structured non-interactive JSON-stream protocol.
 
 ---
 
 ## Memory / State Management
 
-### State Model
+### Runtime State
 
-- Global singleton runtime state in `bootstrap/state.ts` for cross-module counters/flags/latches.
-- Reactive AppState for UI/task/plugin/mcp/bridge statuses.
-- Light store abstraction with immutable update pattern.
+- Global session runtime state in `bootstrap/state.ts`.
+- AppState for UI/task/plugin/mcp/bridge-level reactive data.
+- Side-effect synchronization in `state/onChangeAppState.ts`.
 
 ### Persistence
 
-- Session transcripts in JSONL with parent UUID chaining.
-- Subagent transcripts in sidechain directories.
-- Per-project and global history stores.
-- Project-level persisted cost stats.
-- Cached remote managed settings and policy limits with background polling.
+- JSONL transcript chain with parent references.
+- Subagent-specific transcript sidechains.
+- History store for command and pasted-content recovery.
+- Cost/usage snapshot persistence for resumed sessions.
 
-### Background Processing
+### Background Work
 
-- Cleanup registry coordinates graceful shutdown hooks.
-- Background polling for policy and remote settings refresh.
-- Optional background housekeeping for memory extraction and protocol registration.
+- Cleanup registry ensures predictable shutdown behavior.
+- Managed-settings and policy-limits refresh flows run in background loops.
+- Optional housekeeping subsystems (memory extraction, protocol registration) are gate-driven.
 
 ---
 
 ## Security & Permissions
 
-### Access Control and Safeguards
+### Security Boundaries
 
-- Trust boundary enforced in onboarding flow before full env application.
-- Granular permission model with allow/deny/ask rules per source.
-- Managed policy support can force managed-only domains/read paths.
-- Sandbox adapter integrates filesystem/network restrictions from settings + permission rules.
-- Protective deny-write defaults include settings files and sensitive `.claude/skills` paths.
+- Trust gating before full environment expansion.
+- Hierarchical permission rules (allow/deny/ask) from multiple sources.
+- Managed-policy enforcement for domains, read/write scope, and feature access.
+- Sandbox integration across filesystem and network dimensions.
 
-### Runtime Security Controls
+### Runtime Protection Mechanisms
 
-- Permission prompts can be hook/classifier mediated.
-- Denial-tracking fallback prevents classifier-only deadlocks by reintroducing prompts.
-- Policy-limits service gates sensitive features (such as remote control) at org level.
-- Remote/session permission requests use explicit control protocol messaging.
+- Permission prompts with hook + classifier mediation.
+- Classifier denial tracking to avoid unsafe silent loops.
+- Policy limit enforcement before sensitive mode activation.
+- Control-protocol protection for remote permission decisions.
 
-### Risk Classification (Observed Attack Surfaces)
+### Risk Surface (Engineering View)
 
-- High-risk surfaces: shell execution tools, plugin loading, MCP external servers, remote bridge controls.
-- Medium-risk surfaces: persistent memory files, session resume/replay paths, policy cache staleness windows.
-- Mitigations present: trust dialog, sandboxing, managed settings precedence, explicit allowlists, deny-write controls, auth refresh and token scoping.
+- High risk: shell execution, plugin loading, MCP remote servers, bridge control paths.
+- Medium risk: state replay/resume logic, persistent memory content, remote metadata synchronization.
+- Existing safeguards: trust checks, sandbox policies, managed-source precedence, deny-write restrictions, auth/token refresh.
 
 ---
 
-## Design Patterns & Engineering Decisions
+## Design Decisions and Trade-offs
 
-### Patterns Used
 
-- Feature-gated modular architecture with dead-code elimination.
-- Lazy-loading of heavy subsystems to optimize startup latency.
-- Event-driven streaming pipeline (messages, tool progress, control requests).
-- Functional state transitions and immutable updates.
-- Protocol-adapter pattern for MCP/bridge/remote transports.
+### Architectural Choices
 
-### Why These Choices Work
+- Modular capability model with feature-gated composition.
+- Streaming-first execution model for responsiveness.
+- Adapter pattern for external transports and protocol integrations.
+- Persistent task + transcript model for long-running workflows.
 
-- Startup responsiveness is prioritized via dynamic imports and fast-path entry dispatch.
-- Runtime extensibility is achieved through tools/commands/skills/plugins as independently composable registries.
-- Operational safety is embedded via trust + permission + sandbox + policy-limits layered checks.
-- Scalability to complex agent workflows is supported by a dedicated task framework rather than ad-hoc async calls.
+### Why This Works in Production
+
+- Fast startup without sacrificing runtime depth.
+- Strong separation between startup, query execution, and integration planes.
+- Safety model is layered rather than relying on a single control.
+- Extensibility does not require core-runtime rewrites.
 
 ### Trade-offs
 
-- Complexity is very high due to gate combinatorics and dual-path runtime behavior.
-- Global singleton state increases coordination power but raises coupling and testing overhead.
-- Mirrored source layout and path aliasing improve packaging flexibility but increase navigation ambiguity.
+- Gate combinatorics increase cognitive complexity.
+- Global state singleton can increase cross-module coupling.
+- Dual-path integrations (legacy + newer bridge paths) add maintenance overhead.
 
 ---
 
 ## Key Insights
 
-1. This is effectively an AI execution OS, not only a terminal chatbot.
-2. The bridge subsystem is sophisticated and supports multiple backend protocols and failover styles.
-3. Tool execution is engineered for controlled concurrency with deterministic message semantics.
-4. Security design is layered and practical: trust gating, policy-gating, rule-based permissions, and sandbox runtime.
-5. The extension surface (skills/plugins/MCP) is first-class and deeply integrated into command/tool orchestration.
-6. Context and memory management are treated as core systems with compaction, snipping, and typed memory workflows.
+1. Claude Code runtime behaves like a compact agent operating system, not a simple CLI shell.
+2. The task framework is a major differentiator: it supports reliable long-lived, multi-agent workflows.
+3. Tool orchestration is implemented with production-grade scheduling and cancellation semantics.
+4. Security is deeply integrated into runtime decisions, not bolted on at the command layer.
+5. Plugin, skill, and MCP ecosystems are first-class runtime citizens.
 
 ---
 
 ## Conclusion
 
-From my reverse-engineering, this codebase is a mature, production-grade runtime with enterprise-aware controls, deep extensibility, and robust multi-mode execution paths. The strongest engineering qualities are:
 
-- Explicit subsystem boundaries (entry/init/query/tools/tasks/bridge)
-- Operational resilience (retry, fallback, background polling, cleanup hooks)
-- Security-first runtime decisions at multiple layers
+Claude Code’s runtime architecture is mature, scalable, and built for real production agent workloads.  
+Its strongest qualities are:
 
-Primary future improvements I would prioritize:
+- Clear layered design
+- Robust operational behavior under long sessions
+- Strong safety and policy control model
+- Deep extensibility with controlled execution boundaries
 
-1. Reduce cognitive complexity from feature-gate branching by formalizing capability profiles.
-2. Further decouple global state into domain stores to improve test isolation.
-3. Consolidate mirrored source layout clarity with explicit build/docs metadata for contributors.
+From an engineering maturity perspective, this is a serious production runtime with deliberate decisions around performance, reliability, and secure agent execution.
 
